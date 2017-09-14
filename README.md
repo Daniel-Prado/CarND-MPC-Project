@@ -50,7 +50,9 @@ The polynomial fitting is done to a third order, that is enough to model a car t
  Y' =  -sin(psi) * (ptsx[i] - x) + cos(psi) * (ptsy[i] - y);  
 ```
 where `X',Y'` denote coordinates in the vehicle coordinate system. The initial position of the car and heading direction are always zero in this system of reference. Thus the state of the car in the vehicle cordinate system would be
+
 `state << 0, 0, 0, v, cte, epsi;`
+
 initially, and assuming zero latency.
 
 #### Dealing with Model Latency
@@ -70,6 +72,7 @@ My approach is to incorporate the latency model in the basic model by predicting
 	double pred_epsi = epsi + v * -delta / Lf * latency;
 ```
 After this transformation, the state is feed like this: 
+
 `state << pred_px, pred_py, pred_psi, pred_v, pred_cte, pred_epsi;`
 
 #### MPC Model state Update and Cost Function
@@ -103,6 +106,9 @@ Note that in my code I have updated the sign `(+)` of the `delta[t]` to take int
 Finally we take the following output of the MPC Solver function:
 * Actuators: these are the `throttle` and `steer` values to be applied in the current iteration.
 * `{mpc_x, mpc_y}` is the car trajectory predicted by the model. Note how the model tries to approach the reference trajectory as much as possible (also depending on how we have defined the cost function - for example, if we gave too little weight to the CTE component, then the car could follow a trajectory parallel to the reference, but not overlapping it.).
+
+#### Timesteps (N) and Timestep Duration (dt) Tunning
+The project rubric asks to tune Timesteps (N) and Timestep Duration (dt) values. I originally was using values of 20 for N and 0.2 for dt, which gave a 4 second prediction span. However, this lead to a bad functioning model because 0.2s is a too big delay to react. Moreover a big N lead to slow computations. Finally and following Udacity office class tips I set N to 10, and a dt of 0.1s. This means that we are predicting 1 second ahead only, but that's fine taking into account the high speeds we are running the car.
 
 ---
 
