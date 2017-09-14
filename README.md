@@ -12,6 +12,7 @@ Unlike the PID controller subject of the previous project, the MPC keeps the fut
 As an additional difficulty, the controller simulates a 100ms latency in the actuators, which is a situation that would be found in a real system.
 
 See my final results in the following video:
+
 [![Project 5 Output](https://img.youtube.com/vi/aZsFpR6GgnA/0.jpg)](https://www.youtube.com/watch?v=aZsFpR6GgnA)
 
 ### Project Steps
