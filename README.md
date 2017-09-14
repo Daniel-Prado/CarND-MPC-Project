@@ -1,5 +1,107 @@
 # CarND-Controls-MPC
-Self-Driving Car Engineer Nanodegree Program
+[![Udacity - Self-Driving Car NanoDegree](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
+
+#### Daniel Prado Rodriguez
+#### Feb'2017 Cohort
+---
+## Intro
+This project implements an MPC (Model Predictive Control) Controller that drives Udacity's Car Simulator around a closed virtual track, following specific waypoints that mark the middle line along the track. Waypoints info are provided online by the simulator server.
+
+Unlike the PID controller subject of the previous project, the MPC keeps the future predicted values into account when optimizing the actuators for the current timeslot (iteration). This is done by optimizing a finite time-horizon, in our case the predicted vs. desired trajectory of the car, then apply the actuators for the current iteration, and optimize the finite time-horizon trajectory again in next iteration.
+
+As an additional difficulty, the controller simulates a 100ms latency in the actuators, which is a situation that would be found in a real system.
+
+See my final results in the following video:
+[![Project 5 Output](https://img.youtube.com/vi/aZsFpR6GgnA/0.jpg)](https://www.youtube.com/watch?v=aZsFpR6GgnA)
+
+### Project Steps
+The code follows the following functional structure:
+* Fit a polynomial line (desired trajectory) along the track waypoints provided by the simulator.
+* Evaluate the current car state with respect to the reference desired trajectory.
+* Set state, polynomial coeffs, variables and constraints for the MPC.
+* Solve the MPC calculations
+* Apply the result MPC actuators (Steer and Throttle).
+* Apply the result MPC values to draw the predicted trajectory.
+
+## Model Description
+
+**Rubric Point - The Model** : Student describes their model in detail. This includes the state, actuators and update equations.
+
+The project applies a basic kinematic model for the simulated car. We need to keep in mind that a kinematic model is a simplification of a dynamic model that ignores tire forces, gravity, and mass. This allows to drive the simulated car at a very high speeds of even 100 mph along quite sharp curves.
+
+The model state is defined by the following variables, provided by the simulator. Shown here the simulator tag and (variable).
+* x (px): car's current x-position in map coordinates.
+* y (py): car's current y-position in map coordinates.
+* psi (psi): car's orientation
+* speed (v) : car's longitudinal speed.
+
+Besides, the simulator provides additional data:
+* ptsx & ptsy: x and y positions of waypoints (desired/reference trajectory) in map coordinates.
+* steering_angle (delta) : steering wheel angle of the car, not to confuse with psi (actual orientation of the car).
+* throttle (a) : current throttle.
+Note: I find it confussing how in the project we are expected to assimilate that acceleration (a) is the same concept that the throttle value. Obviously both are related, but not in the same units.
+
+#### Polynomial Fitting
+The project uses the car's coordinate system. As shown above the first step is to fit the polynomial line along the track waypoints, and this is done in vehicle coordinates. To do so, we shift the origin to the current poistion of the vehicle and perform rotation to align the x-axis with the heading direction.
+The polynomial fitting is done to a third order, that is enough to model a car trajectory in most cases. The transformation used is 
+```
+ X' =   cos(psi) * (ptsx[i] - x) + sin(psi) * (ptsy[i] - y);
+ Y' =  -sin(psi) * (ptsx[i] - x) + cos(psi) * (ptsy[i] - y);  
+```
+where `X',Y'` denote coordinates in the vehicle coordinate system. The initial position of the car and heading direction are always zero in this system of reference. Thus the state of the car in the vehicle cordinate system would be
+`state << 0, 0, 0, v, cte, epsi;`
+initially, and assuming zero latency.
+
+#### Dealing with Model Latency
+The project code simulates actuator latency by introducing a 100ms delay before sending the actuator inputs back to the simualtor. 
+In my implementation, I first made the model work with latency 0ms, but then when setting it back to 100ms, the car started to oscillate quite violently.
+This is logical, because the optimized steer and throttle values are estimated based on the vehicle current state and not on the state after the latency time has transcurred.
+
+My approach is to incorporate the latency model in the basic model by predicting the future car state after 100 ms time. This is done after the system of reference transformation explained in the previous section. Hence, the state prediceted after 100ms is calculated as follows:
+```
+    //Predicted car's state after latency transcurred
+    // x, y and psi are all zero after transformation above
+	double pred_px = 0.0 + v * latency; // Since psi is zero, cos(0) = 1
+	const double pred_py = 0.0; // Since sin(0) = 0, (y + v * 0 * dt)
+	double pred_psi = 0.0 + v * -delta / Lf * latency;
+	double pred_v = v + a * latency;
+	double pred_cte = cte + v * sin(epsi) * latency;
+	double pred_epsi = epsi + v * -delta / Lf * latency;
+```
+After this transformation, the state is feed like this: 
+`state << pred_px, pred_py, pred_psi, pred_v, pred_cte, pred_epsi;`
+
+#### MPC Model state Update and Cost Function
+Finally the MPC model is defined by the following equations:
+```
+    // x_[t+1] = x[t] + v[t] * cos(psi[t]) * dt
+    // y_[t+1] = y[t] + v[t] * sin(psi[t]) * dt
+    // psi_[t+1] = psi[t] (+) v[t] / Lf * delta[t] * dt
+    // v_[t+1] = v[t] + a[t] * dt
+    // cte[t+1] = f(x[t]) - y[t] + v[t] * sin(epsi[t]) * dt
+    // epsi[t+1] = psi[t] - psides[t] (+) v[t] * delta[t] / Lf * dt
+```
+Note that in my code I have updated the sign `(+)` of the `delta[t]` to take into account how the simulator expects the steer values (opposite to our coordinates system).
+
+, the following constraints:
+```
+//  -0.436332 < delta < 0.436332 // - that is [-25,+25] degrees, in radians.
+//  -1.0 < trottle < 1.0 //
+```
+, and the following cost function (pseudocode shown). Note that multipliers have been tuned manually in order to give more or less weight to cost components.
+```
+   Cost  = SUM(i) of { 2000 * cte(i)^2
+              + 2000 * epsi(i)^2 
+              + (v(i)-v_ref)^2
+              + 100 * delta(i)^2 
+              + 10 * a(i)^2 
+              + 500 * [delta(i+1)-delta(i)] 
+              + 10 * [a(i+1)-a(i)] }
+```
+
+Finally we take the following output of the MPC Solver function:
+* Actuators: these are the `throttle` and `steer` values to be applied in the current iteration.
+* `{mpc_x, mpc_y}` is the car trajectory predicted by the model. Note how the model tries to approach the reference trajectory as much as possible (also depending on how we have defined the cost function - for example, if we gave too little weight to the CTE component, then the car could follow a trajectory parallel to the reference, but not overlapping it.).
 
 ---
 
@@ -128,4 +230,3 @@ still be compilable with cmake and make./
 
 ## How to write a README
 A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
-
